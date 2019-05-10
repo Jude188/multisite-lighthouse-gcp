@@ -28,7 +28,7 @@ const sinon = require(`sinon`);
 const test = require(`ava`);
 const proxyquire = require(`proxyquire`).noCallThru();
 const tools = require(`@google-cloud/nodejs-repo-tools`);
-const mockLhr = require(`./mock.lhr.json`);
+const mockPsi = require(`./mock.psi.json`);
 
 const mockConfig = require(`./config.test.json`);
 let config;
@@ -80,15 +80,19 @@ function getSample(options) {
   const puppeteerMock = {
     launch: sinon.stub().returns(browserMock)
   };
-  const lighthouseMock = sinon.stub().returns(Promise.resolve({report: ['report1', 'report2', 'report3'], lhr: mockLhr}));
+  const pagespeedreportMock = {runpagespeed: sinon.stub().returns(Promise.resolve(mockPsi))};
+  const pagespeedapiMock = {pagespeedapi: pagespeedreportMock};
+  const googleapisMock = {pagespeedonline: sinon.stub().returns(pagespeedapiMock)}
+
+  googleapisMock.pagespeedonline().pagespeedapi.runpagespeed()
   return {
     program: proxyquire(`../`, {
       './config.json': config,
       '@google-cloud/bigquery': {BigQuery: BigQueryMock},
       '@google-cloud/pubsub': {PubSub: PubSubMock},
       '@google-cloud/storage': {Storage: StorageMock},
-      'puppeteer': puppeteerMock,
-      'lighthouse': lighthouseMock,
+      'googleapis': {google: googleapisMock},
+      'PageSpeed': {PageSpeed: pagespeedapiMock},
       'fs': fsMock,
       'util': {promisify: (req => req)}
     }),
@@ -101,8 +105,8 @@ function getSample(options) {
       Storage: StorageMock,
       storage: storageMock,
       fs: fsMock,
-      puppeteer: puppeteerMock,
-      lighthouse: lighthouseMock
+      googleapis: googleapisMock,
+      PageSpeed: pagespeedapiMock
     }
   };
 }
@@ -135,7 +139,7 @@ test.serial(`should fail without valid pubsub message`, async t => {
   const expectedMsg = 'No valid message found!';
 
   // Call function and verify behavior
-  await sample.program.launchLighthouse(event);
+  await sample.program.launchPagespeedInsights(event);
   t.deepEqual(console.error.firstCall.args, [expectedMsg]);
 });
 
@@ -150,50 +154,20 @@ test.serial(`should convert object to ndJson string`, t => {
   t.deepEqual(result, expected);
 });
 
-test.serial(`should convert lhr to bigquery schema`, t => {
-  // Initialize mocks
-  const sample = getSample();
-  const expected = require(`./mock.parsed_lhr.json`);
-
-  // Call function and verify behavior
-  const result = sample.program._createJSON(mockLhr, 'googlesearch');
-  t.deepEqual(result, expected);
-});
-
-test.serial(`should launch puppeteer and lighthouse without lighthouseFlags`, async t => {
-  // Initialize mocks
-  const sample = getSample();
-  delete config.lighthouseFlags;
-  const id = 'googlesearch';
-  const url = 'https://www.google.com/';
-
-  // Call function and verify behavior
-  await sample.program._launchBrowserWithLighthouse(id, url);
-  t.deepEqual(console.log.callCount, 5);
-  t.deepEqual(console.log.args, [
-    [`${id}: Starting browser for ${url}`],
-    [`${id}: Browser started for ${url}`],
-    [`${id}: Starting lighthouse for ${url}`],
-    [`${id}: Lighthouse done for ${url}`],
-    [`${id}: Browser closed for ${url}`]
-  ]);
-});
-
-test.serial(`should launch puppeteer and lighthouse with lighthouseFlags`, async t => {
+test.serial(`should call Pagespeed Insights API`, async t => {
   // Initialize mocks
   const sample = getSample();
   const id = 'googlesearch';
   const url = 'https://www.google.com/';
+  const strategy = 'mobile';
+  const category = ["performance"]
 
   // Call function and verify behavior
-  await sample.program._launchBrowserWithLighthouse(id, url);
-  t.deepEqual(console.log.callCount, 5);
+  await sample.program._getPagespeedInsightsReport(id, url, strategy, category);
+  t.deepEqual(console.log.callCount, 2);
   t.deepEqual(console.log.args, [
-    [`${id}: Starting browser for ${url}`],
-    [`${id}: Browser started for ${url}`],
-    [`${id}: Starting lighthouse for ${url}`],
-    [`${id}: Lighthouse done for ${url}`],
-    [`${id}: Browser closed for ${url}`]
+    [`${id}: Requesting Pagespeed Insight report for ${url} on ${strategy}`],
+    [`${id}: Pagespeed Insight report received for ${url} on ${strategy}`],
   ]);
 });
 
@@ -223,7 +197,7 @@ test.serial(`should return active state if trigger fired < ${mockConfig.minTimeB
   const expected = {active: true, delta: 10};
 
   // Call function and verify behavior
-  const result = await sample.program._checkEventState('googlesearch', new Date().getTime() - mockConfig.minTimeBetweenTriggers + 10000);
+  const result = await sample.program._checkEventState('googlesearch', 'mobile',  new Date().getTime() - mockConfig.minTimeBetweenTriggers + 10000);
   t.deepEqual(result, expected);
 });
 
@@ -233,7 +207,7 @@ test.serial(`should return inactive state if trigger fired >= ${mockConfig.minTi
   const expected = {active: false};
 
   // Call function and verify behavior
-  const result = await sample.program._checkEventState('googlesearch', new Date().getTime());
+  const result = await sample.program._checkEventState('googlesearch', 'mobile', new Date().getTime());
   t.deepEqual(result, expected);
 });
 
@@ -245,48 +219,43 @@ test.serial(`should abort main function if trigger fired < ${mockConfig.minTimeB
   };
 
   // Call function and verify behavior
-  await sample.program.launchLighthouse(event);
-  t.true(console.log.calledWith(`googlesearch: Found active event (0s < ${mockConfig.minTimeBetweenTriggers/1000}s), aborting...`));
+  await sample.program.launchPagespeedInsights(event);
+  t.true(console.log.calledWith(`googlesearch: Found active event on mobile (0s < ${mockConfig.minTimeBetweenTriggers/1000}s), aborting...`));
 });
 
 test.serial(`should write only object log to gcs bucket if output not defined`, async t => {
   // Initialize mocks
   const sample = getSample();
-  delete config.lighthouseFlags.output;
-  const mockObj = {
-    lhr: {fetchTime: "2018-12-17T10:56:56.420Z"}
-  };
+  delete config.outputFormat;
+  const mockObj = {analysisUTCTimestamp: "2018-12-17T10:56:56.420Z",
+                   emulatedFormFactor: "desktop"};
   const id = 'ebay';
 
   // Call function and verify behavior
   await sample.program._writeLogAndReportsToStorage(mockObj, id);
   t.deepEqual(sample.mocks.storage.bucket().file().save.callCount, 1);
-  t.true(sample.mocks.storage.bucket.calledWith('lighthouse-reports'));
-  t.true(sample.mocks.storage.bucket().file.calledWith(`${id}/log_${mockObj.lhr.fetchTime}.json`));
-  t.deepEqual(sample.mocks.storage.bucket().file().save.firstCall.args, [JSON.stringify(mockObj.lhr, null, " "), {metadata: {contentType: 'application/json'}}]);
+  t.true(sample.mocks.storage.bucket.calledWith('pagespeedinsights-reports'));
+  t.deepEqual(sample.mocks.storage.bucket().file().save.firstCall.args, [JSON.stringify(mockObj, null, " "), {metadata: {contentType: 'application/json'}}]);
+
+  t.true(sample.mocks.storage.bucket().file.calledWith(`${id}/${mockObj.emulatedFormFactor}/log_${mockObj.analysisUTCTimestamp}.json`));
+  t.deepEqual(sample.mocks.storage.bucket().file().save.firstCall.args, [JSON.stringify(mockObj, null, " "), {metadata: {contentType: 'application/json'}}]);
 });
 
 test.serial(`should write object reports and log to gcs bucket if output defined`, async t => {
   // Initialize mocks
   const sample = getSample();
-  const mockObj = {
-    report: ['report1', 'report2', 'report3'],
-    lhr: {fetchTime: "2018-12-17T10:56:56.420Z"}
-  };
+  const mockObj = {analysisUTCTimestamp: "2018-12-17T10:56:56.420Z",
+                   emulatedFormFactor: "desktop"};
   const id = 'ebay';
 
   // Call function and verify behavior
   await sample.program._writeLogAndReportsToStorage(mockObj, id);
-  t.deepEqual(sample.mocks.storage.bucket().file().save.callCount, 4);
-  t.true(sample.mocks.storage.bucket.calledWith('lighthouse-reports'));
-  t.true(sample.mocks.storage.bucket().file.calledWith(`${id}/report_${mockObj.lhr.fetchTime}.html`));
-  t.deepEqual(sample.mocks.storage.bucket().file().save.firstCall.args, ['report1', {metadata: {contentType: 'text/html'}}]);
-  t.true(sample.mocks.storage.bucket().file.calledWith(`${id}/report_${mockObj.lhr.fetchTime}.csv`));
-  t.deepEqual(sample.mocks.storage.bucket().file().save.secondCall.args, ['report2', {metadata: {contentType: 'text/csv'}}]);
-  t.true(sample.mocks.storage.bucket().file.calledWith(`${id}/report_${mockObj.lhr.fetchTime}.json`));
-  t.deepEqual(sample.mocks.storage.bucket().file().save.thirdCall.args, ['report3', {metadata: {contentType: 'application/json'}}]);
-  t.true(sample.mocks.storage.bucket().file.calledWith(`${id}/log_${mockObj.lhr.fetchTime}.json`));
-  t.deepEqual(sample.mocks.storage.bucket().file().save.lastCall.args, [JSON.stringify(mockObj.lhr, null, " "), {metadata: {contentType: 'application/json'}}]);
+  //t.deepEqual(JSON.stringify(console.log.getCalls()), 'hello')
+  t.deepEqual(sample.mocks.storage.bucket().file().save.callCount, 2);
+  t.true(sample.mocks.storage.bucket.calledWith('pagespeedinsights-reports'));
+  t.true(sample.mocks.storage.bucket().file.calledWith(`${id}/${mockObj.emulatedFormFactor}/report_${mockObj.analysisUTCTimestamp}.json`));
+  t.true(sample.mocks.storage.bucket().file.calledWith(`${id}/${mockObj.emulatedFormFactor}/log_${mockObj.analysisUTCTimestamp}.json`));
+  t.deepEqual(sample.mocks.storage.bucket().file().save.lastCall.args, [JSON.stringify(mockObj, null, " "), {metadata: {contentType: 'application/json'}}]);
 });
 
 test.serial(`should fire all pubsub triggers with 'all' message`, async t => {
@@ -297,7 +266,7 @@ test.serial(`should fire all pubsub triggers with 'all' message`, async t => {
   };
 
   // Call function and verify behavior
-  await sample.program.launchLighthouse(event);
+  await sample.program.launchPagespeedInsights(event);
   t.true(sample.mocks.pubsub.topic().publisher().publish.calledWith(Buffer.from('googlesearch')));
   t.true(sample.mocks.pubsub.topic().publisher().publish.calledWith(Buffer.from('ebay')));
 });
@@ -311,7 +280,7 @@ test.serial(`should catch error`, async t => {
   };
 
   // Call function and verify behavior
-  await sample.program.launchLighthouse(event);
+  await sample.program.launchPagespeedInsights(event);
   t.deepEqual(console.error.firstCall.args, [new TypeError('Cannot read property \'map\' of undefined')]);
 });
 
@@ -324,6 +293,7 @@ test.serial(`should call bigquery load for id when called with id in pubsub mess
   };
 
   // Call function and verify behavior
-  await sample.program.launchLighthouse(event);
+  await sample.program.launchPagespeedInsights(event);
+  // t.deepEqual(JSON.stringify(console.log.getCalls()), 1);
   t.deepEqual(sample.mocks.bigquery.dataset().table().load.callCount, 1);
 });

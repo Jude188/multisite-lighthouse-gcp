@@ -1,22 +1,23 @@
 {
   "source": [
     {
-      "url": "https://www.google.com/",
-      "id": "googlesearch"
-    },{
       "url": "https://www.ebay.com/",
+      "strategy": "desktop",
+      "category": ["accessibility", "best-practices", "performance", "pwa", "seo"],
       "id": "ebay"
+    },{
+      "url": "https://www.google.com/",
+      "strategy": "mobile",
+      "category": ["accessibility", "best-practices", "performance", "pwa", "seo"],
+      "id": "googlesearch"
     }
   ],
-  "projectId": "multisite-lighthouse-gcp",
-  "pubsubTopicId": "launch-lighthouse",
-  "datasetId": "lighthouse",
+  "projectId": "pagespeedinsights-gcp",
+  "pubsubTopicId": "launch-pagespeedinsights",
+  "datasetId": "pagespeed-insights",
   "minTimeBetweenTriggers": 300000,
-  "lighthouseFlags": {
-    "output": ["html", "csv", "json"],
-    "emulatedFormFactor": "desktop"
-  },
   "gcs": {
-    "bucketName": "lighthouse-reports"
-  }
+    "bucketName": "pagespeedinsights-reports"
+  },
+  "outputFormat": ["json"]
 }

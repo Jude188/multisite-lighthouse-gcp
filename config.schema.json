@@ -14,9 +14,18 @@
           },
           "url": {
             "type": "string"
+          },
+          "strategy": {
+            "type": "string"
+          },
+          "category": {
+            "type": "array",
+            "items": {
+            "type": "string"
+            }
           }
         },
-        "required": ["id", "url"]
+        "required": ["id", "url", "strategy"]
       }
     },
     "projectId": {
@@ -31,17 +40,15 @@
     "minTimeBetweenTriggers": {
       "type": "number"
     },
-    "lighthouseFlags": {
-      "type": "object",
-      "properties": {
-        "output": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["html", "csv", "json"]
-          }
-        }
+    "outputFormat": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["html", "csv", "json"]
       }
+    },
+    "auth": {
+      "type": "string"
     },
     "gcs": {
       "type": "object",
@@ -53,5 +60,5 @@
       "required": ["bucketName"]
     }
   },
-  "required": ["source", "projectId", "datasetId", "pubsubTopicId", "minTimeBetweenTriggers", "gcs"]
+  "required": ["source", "projectId", "datasetId", "pubsubTopicId", "minTimeBetweenTriggers", "gcs", "outputFormat"]
 }
