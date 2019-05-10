@@ -6,3 +6,5 @@ package-lock.json
 secret
 .nyc_output
 coverage
+config.json
+sftp-config.json
